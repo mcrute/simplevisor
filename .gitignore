@@ -1,0 +1,6 @@
+/simplevisor
+/simplevisor.json
+/test.sh
+/Session.vim
+/coverage.out
+/supervise/zzz_syscall_map.go
