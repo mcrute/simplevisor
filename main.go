@@ -36,7 +36,7 @@ func readConfig(path string) (*supervise.AppConfig, error) {
 	return cfg, nil
 }
 
-func parentMain(cfgLoc string) {
+func parentMain(cfgLoc string, disableVault bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -56,9 +56,14 @@ func parentMain(cfgLoc string) {
 		logger.Fatalf("parentMain: error loading config: %s", err)
 	}
 
-	vc, err := secrets.NewVaultClient(&secrets.VaultClientConfig{})
-	if err != nil {
-		logger.Fatalf("parentMain: unable to setup vault: %s", err)
+	var vc secrets.ClientManager
+	if !disableVault {
+		vc, err = secrets.NewVaultClient(&secrets.VaultClientConfig{})
+		if err != nil {
+			logger.Fatalf("parentMain: unable to setup vault: %s", err)
+		}
+	} else {
+		vc, _ = secrets.NewNoopClient()
 	}
 
 	if err := vc.Authenticate(ctx); err != nil {
@@ -153,11 +158,12 @@ func parentMain(cfgLoc string) {
 func main() {
 	mode := flag.String("mode", modeParent, "mode in which to run simplevisor, internal use only")
 	config := flag.String("config", "simplevisor.json", "config file location")
+	noVault := flag.Bool("no-vault", false, "disable Vault integrate entirely")
 	flag.Parse()
 
 	switch *mode {
 	case modeParent:
-		parentMain(*config)
+		parentMain(*config, *noVault)
 	case modeChild:
 		supervise.ChildMain()
 	default:
