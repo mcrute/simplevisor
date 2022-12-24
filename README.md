@@ -69,14 +69,22 @@ environment of managed processes. This will happen once at Simplevisor
 startup time and each managed process will see the same secrets.
 
 Replacement variables are colon (``:``) separated lists of three
-arguments: type, path, and field. Type is one of ``db`` or ``secret``
-where ``db`` refers to database credentials (mounted at ``database/`` in
-Vault) and ``secret`` refers to JSON formatted KV secrets (mounted at
-``kv/`` in Vault). The path is the path within the mount-point to the
-secret. For database credentials the field can be one of ``Username``
-or ``Password`` and nothing else. For secret type credential the field
-refers to the key in the returned JSON document, only single-level JSON
-documents containing string keys and values are supported.
+arguments: path, field, and type. The path is the path within the
+mount-point to the secret. For secret type credential the field refers
+to the key in the returned JSON document, only single-level JSON
+documents containing string keys and values are supported. Other types
+have constraints listed below.
+
+Type is one of:
+
+ * ``db``, which refers to database credentials (mounted at
+   ``database/`` in Vault). Valid field names are ``Username`` and
+   ``Password``, nothing else.
+ * ``secret``, which refers to JSON formatted KV secrets (mounted at
+   ``kv/`` in Vault).
+ * ``aws-user``, which refers to an AWS IAM user credential (mounted at
+   ``aws/`` in Vault). Valid field names are ``KeyId`` and ``SecretKey``,
+   nothing else.
 
 Credentials are cached upon first fetch and subsequent references to
 them will used the cached value. This presents a consistent view of

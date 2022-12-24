@@ -81,6 +81,7 @@ func expandReplacements(ctx context.Context, sc secrets.Client, envMap map[strin
 
 	dbCache := map[string]*secrets.Credential{}
 	secretCache := map[string]map[string]string{}
+	awsUserCache := map[string]*secrets.AWSCredential{}
 	for _, k := range keys {
 		v, ok := envMap[k]
 		if !ok {
@@ -129,6 +130,26 @@ func expandReplacements(ctx context.Context, sc secrets.Client, envMap map[strin
 			}
 			envMap[k] = val
 			replacements[k] = val
+		case "aws-user":
+			cred, ok := awsUserCache[secretPath]
+			if !ok {
+				cred, _, err = sc.AWSIAMUser(ctx, secretPath)
+				if err != nil {
+					return nil, fmt.Errorf("PrepareEnvironment: vault error: %w", err)
+				}
+				awsUserCache[secretPath] = cred
+			}
+
+			switch jsonField {
+			case "KeyId":
+				envMap[k] = cred.AccessKeyId
+				replacements[k] = cred.AccessKeyId
+			case "SecretKey":
+				envMap[k] = cred.SecretAccessKey
+				replacements[k] = cred.SecretAccessKey
+			default:
+				return nil, fmt.Errorf("PrepareEnvironment: unknown field %s for AWS IAM user credential", jsonField)
+			}
 		default:
 			return nil, fmt.Errorf("PrepareEnvironment: invalid secret type %s", secretType)
 		}

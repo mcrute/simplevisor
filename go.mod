@@ -3,7 +3,7 @@ module code.crute.us/mcrute/simplevisor
 go 1.18
 
 require (
-	code.crute.us/mcrute/golib/secrets v0.2.2
+	code.crute.us/mcrute/golib/secrets v0.3.0
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/sys v0.2.0
 	golang.org/x/tools v0.3.0

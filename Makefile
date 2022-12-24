@@ -14,11 +14,11 @@ vet: main.go
 	go vet $<
 
 .PHONY: test
-test:
+test: $(BINARY)
 	go test ./...
 
 .PHONY: cover
-cover:
+cover: $(BINARY)
 	rm coverage.out || true
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out

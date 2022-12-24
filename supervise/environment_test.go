@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"code.crute.us/mcrute/golib/secrets"
 	"github.com/stretchr/testify/assert"
@@ -111,9 +112,10 @@ func TestProcessTemplates(t *testing.T) {
 }
 
 type MockSecretClient struct {
-	dbCalls     int
-	secretCalls int
-	doError     bool
+	dbCalls         int
+	secretCalls     int
+	awsIamUserCalls int
+	doError         bool
 }
 
 func (c *MockSecretClient) DatabaseCredential(ctx context.Context, path string) (*secrets.Credential, secrets.Handle, error) {
@@ -141,9 +143,28 @@ func (c *MockSecretClient) Secret(ctx context.Context, path string, out any) (se
 	}
 	return nil, nil
 }
+func (c *MockSecretClient) AWSIAMUser(ctx context.Context, name string) (*secrets.AWSCredential, secrets.Handle, error) {
+	c.awsIamUserCalls += 1
+	if c.doError {
+		return nil, nil, fmt.Errorf("an error")
+	}
+	return map[string]*secrets.AWSCredential{
+		"path":  &secrets.AWSCredential{AccessKeyId: "key1", SecretAccessKey: "secret1"},
+		"path2": &secrets.AWSCredential{AccessKeyId: "key2", SecretAccessKey: "secret2"},
+	}[name], nil, nil
+}
 func (c *MockSecretClient) WriteSecret(ctx context.Context, path string, in any) error { return nil }
 func (c *MockSecretClient) Destroy(h secrets.Handle) error                             { return nil }
 func (c *MockSecretClient) MakeNonCritical(h secrets.Handle) error                     { return nil }
+func (c *MockSecretClient) AWSAssumeRoleSimple(ctx context.Context, name string) (*secrets.AWSCredential, secrets.Handle, error) {
+	return nil, nil, nil
+}
+func (c *MockSecretClient) AWSAssumeRole(ctx context.Context, name string, sessionName string, ttl time.Duration) (*secrets.AWSCredential, secrets.Handle, error) {
+	return nil, nil, nil
+}
+func (c *MockSecretClient) RawSecret(ctx context.Context, path string, out any) (secrets.Handle, error) {
+	return nil, nil
+}
 
 type ExpandReplacementsSuite struct {
 	suite.Suite
@@ -162,6 +183,10 @@ func (s *ExpandReplacementsSuite) SetupTest() {
 		"SECRET_KEY_ALSO":      "secret:path:baz",
 		"SECRET_KEY_2":         "secret:path2:biz",
 		"SECRET_KEY_INVALID":   "secret:path:invalid",
+		"AWS_IAM_KEYID":        "aws-user:path:KeyId",
+		"AWS_IAM_SECRETKEY":    "aws-user:path:SecretKey",
+		"AWS_IAM_INVALID":      "aws-user:path:invalid",
+		"AWS_IAM_2_KEYID":      "aws-user:path2:KeyId",
 		"INVALID_TYPE":         "foo:bar:baz",
 	}
 	s.sc = &MockSecretClient{}
@@ -216,6 +241,31 @@ func (s *ExpandReplacementsSuite) TestSecretCache() {
 		"SECRET_KEY_ALSO": "buz",
 	}, r)
 	assert.Equal(s.T(), 1, s.sc.secretCalls)
+}
+
+func (s *ExpandReplacementsSuite) TestIamUser() {
+	r, err := expandReplacements(s.ctx, s.sc, s.env, []string{"AWS_IAM_KEYID", "AWS_IAM_2_KEYID"})
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), map[string]string{
+		"AWS_IAM_KEYID":   "key1",
+		"AWS_IAM_2_KEYID": "key2",
+	}, r)
+	assert.Equal(s.T(), 2, s.sc.awsIamUserCalls)
+}
+
+func (s *ExpandReplacementsSuite) TestIamUserInvalidField() {
+	_, err := expandReplacements(s.ctx, s.sc, s.env, []string{"AWS_IAM_INVALID"})
+	assert.ErrorContains(s.T(), err, "unknown field invalid for AWS IAM user credential")
+}
+
+func (s *ExpandReplacementsSuite) TestIamUserSecretKeyAndCache() {
+	r, err := expandReplacements(s.ctx, s.sc, s.env, []string{"AWS_IAM_KEYID", "AWS_IAM_SECRETKEY"})
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), map[string]string{
+		"AWS_IAM_KEYID":     "key1",
+		"AWS_IAM_SECRETKEY": "secret1",
+	}, r)
+	assert.Equal(s.T(), 1, s.sc.awsIamUserCalls)
 }
 
 func (s *ExpandReplacementsSuite) TestNotInEnv() {
