@@ -1,9 +1,9 @@
 module code.crute.us/mcrute/simplevisor
 
-go 1.18
+go 1.22
 
 require (
-	code.crute.us/mcrute/golib/secrets v0.3.0
+	code.crute.us/mcrute/golib/secrets v0.5.1
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/sys v0.2.0
 	golang.org/x/tools v0.3.0
@@ -59,5 +59,6 @@ require (
 	google.golang.org/grpc v1.41.0 // indirect
 	google.golang.org/protobuf v1.26.0 // indirect
 	gopkg.in/square/go-jose.v2 v2.5.1 // indirect
+	gopkg.in/yaml.v2 v2.2.5 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
