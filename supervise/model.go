@@ -3,6 +3,7 @@ package supervise
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 	"syscall"
@@ -13,6 +14,20 @@ import (
 type AppConfig struct {
 	Environment *EnvConfig  `json:"env"`
 	Jobs        *JobsConfig `json:"jobs"`
+}
+
+func ReadAppConfig(path string) (*AppConfig, error) {
+	cf, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("readConfig: unable to load config")
+	}
+
+	cfg := &AppConfig{}
+	if err := json.Unmarshal(cf, &cfg); err != nil {
+		return nil, fmt.Errorf("readConfig: unable to parse config: %s", err)
+	}
+
+	return cfg, nil
 }
 
 type JobsConfig struct {
