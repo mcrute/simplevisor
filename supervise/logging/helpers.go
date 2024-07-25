@@ -2,7 +2,6 @@ package logging
 
 import (
 	"fmt"
-	"os"
 	"sync"
 )
 
@@ -19,15 +18,4 @@ func (l *InternalLogger) Log(message string) {
 
 func (l *InternalLogger) Logf(message string, args ...any) {
 	l.Log(fmt.Sprintf(message, args...))
-}
-
-func (l *InternalLogger) Fatalf(message string, args ...any) {
-	l.Fatal(fmt.Sprintf(message, args...))
-}
-
-func (l *InternalLogger) Fatal(message string) {
-	l.Log(message)
-	l.Cancel()
-	l.WaitGroup.Wait()
-	os.Exit(1)
 }

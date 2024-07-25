@@ -29,6 +29,7 @@ func (p *SupervisorParent) Main(cfgLoc string, disableVault bool) {
 	p.wg = &sync.WaitGroup{}
 
 	sigs := SetupSignals()
+	secretFailures := make(chan error)
 
 	p.log = &logging.InternalLogger{
 		Logs:      make(chan *logging.LogRecord, 100),
@@ -72,7 +73,7 @@ func (p *SupervisorParent) Main(cfgLoc string, disableVault bool) {
 		return
 	}
 
-	go jobs.SecretsLogger(ctx, p.wg, vc, p.log)
+	go jobs.SecretsLogger(ctx, p.wg, vc, p.log, secretFailures)
 	go vc.Run(ctx, p.wg)
 
 	runner := &CommandRunner{
@@ -136,6 +137,10 @@ func (p *SupervisorParent) Main(cfgLoc string, disableVault bool) {
 			for _, h := range p.handles {
 				h.Signal(s)
 			}
+		case f := <-secretFailures:
+			p.log.Logf("%s", f)
+			p.Terminate(false)
+			return
 		case <-ctx.Done():
 			p.Terminate(true)
 			return
