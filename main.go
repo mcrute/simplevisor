@@ -16,7 +16,8 @@ func main() {
 
 	switch *mode {
 	case "parent":
-		supervise.ParentMain(*config, *noVault)
+		parent := &supervise.SupervisorParent{}
+		parent.Main(*config, *noVault)
 	case "child":
 		supervise.ChildMain()
 	default:

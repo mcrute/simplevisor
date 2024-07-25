@@ -13,86 +13,104 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func ParentMain(cfgLoc string, disableVault bool) {
+type SupervisorParent struct {
+	handles []*CommandHandle
+	cancel  func()
+	wg      *sync.WaitGroup
+	log     *logging.InternalLogger
+}
+
+func (p *SupervisorParent) Main(cfgLoc string, disableVault bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	p.cancel = cancel
+	p.handles = []*CommandHandle{}
+	p.wg = &sync.WaitGroup{}
+
 	sigs := SetupSignals()
 
-	wg := &sync.WaitGroup{}
-	logger := &logging.InternalLogger{
+	p.log = &logging.InternalLogger{
 		Logs:      make(chan *logging.LogRecord, 100),
 		Pool:      logging.NewBufferPool(),
 		Cancel:    cancel,
-		WaitGroup: wg,
+		WaitGroup: p.wg,
 	}
-	go logging.StdoutWriter(ctx, wg, os.Stdout, logger)
+	go logging.StdoutWriter(ctx, p.wg, os.Stdout, p.log)
 
 	cfg, err := ReadAppConfig(cfgLoc)
 	if err != nil {
-		logger.Fatalf("parentMain: error loading config: %s", err)
+		p.fatal("parentMain: error loading config: %s", err)
+		return
 	}
 
 	var vc secrets.ClientManager
 	if !disableVault {
 		vc, err = secrets.NewVaultClient(&secrets.VaultClientConfig{})
 		if err != nil {
-			logger.Fatalf("parentMain: unable to setup vault: %s", err)
+			p.fatal("parentMain: unable to setup vault: %s", err)
+			return
 		}
 	} else {
 		vc, _ = secrets.NewNoopClient()
 	}
 
 	if err := vc.Authenticate(ctx); err != nil {
-		logger.Fatalf("parentMain: unable to auth vault: %s", err)
+		p.fatal("parentMain: unable to auth vault: %s", err)
+		return
 	}
 
 	// TODO: Support VAULT_TOKEN
 	env, err := PrepareEnvironment(ctx, cfg.Environment, vc, "")
 	if err != nil {
-		logger.Fatalf("parentMain: unable to prepare environment: %s", err)
+		p.fatal("parentMain: unable to prepare environment: %s", err)
+		return
 	}
 
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, uintptr(1), 0, 0, 0); err != nil {
-		logger.Fatalf("parentMain: unable to become subreaper: %s", err)
+		p.fatal("parentMain: unable to become subreaper: %s", err)
+		return
 	}
 
-	go jobs.SecretsLogger(ctx, wg, vc, logger)
-	go vc.Run(ctx, wg)
+	go jobs.SecretsLogger(ctx, p.wg, vc, p.log)
+	go vc.Run(ctx, p.wg)
 
 	runner := &CommandRunner{
-		Logger:      logger,
+		Logger:      p.log,
 		BaseContext: ctx,
-		WaitGroup:   wg,
+		WaitGroup:   p.wg,
 		Environment: env,
 	}
 
 	if cfg.Jobs.Init != nil {
 		for _, js := range cfg.Jobs.Init {
-			logger.Logf("parentMain: attempting to start job %s", js.Name)
+			p.log.Logf("parentMain: attempting to start job %s", js.Name)
 
 			hnd, err := runner.Run(js)
 			if err != nil {
-				logger.Fatalf("parentMain: error starting init job %s: %s", js.Name, err)
+				p.fatal("parentMain: error starting init job %s: %s", js.Name, err)
+				return
 			}
 			if err := hnd.Wait(); err != nil {
-				logger.Fatalf("parentMain: error running init job %s: %s", js.Name, err)
+				p.fatal("parentMain: error running init job %s: %s", js.Name, err)
+				return
 			}
 			if exit := hnd.ExitCode(); exit != 0 {
-				logger.Fatalf("parentMain: error init job %s exited non-zero: %d", js.Name, exit)
+				p.fatal("parentMain: error init job %s exited non-zero: %d", js.Name, exit)
+				return
 			}
 			hnd.Cleanup()
 		}
 	}
 
 	// TODO: Restart if crashed
-	handles := []*CommandHandle{}
 	for _, js := range cfg.Jobs.Main {
 		hnd, err := runner.Run(js)
 		if err != nil {
-			logger.Fatalf("parentMain: error starting main job %s: %s", js.Name, err)
+			p.fatal("parentMain: error starting main job %s: %s", js.Name, err)
+			return
 		}
-		handles = append(handles, hnd)
+		p.handles = append(p.handles, hnd)
 	}
 
 	// TODO: Clean this up
@@ -100,10 +118,10 @@ func ParentMain(cfgLoc string, disableVault bool) {
 	for {
 		exits, err := ReapChildren()
 		if err != nil {
-			logger.Logf("Error reaping children: %s", err)
+			p.log.Logf("Error reaping children: %s", err)
 		} else {
 			for _, e := range exits {
-				logger.Logf("Reaped child %d with exit %d", e.Pid, e.Status)
+				p.log.Logf("Reaped child %d with exit %d", e.Pid, e.Status)
 			}
 		}
 
@@ -111,23 +129,39 @@ func ParentMain(cfgLoc string, disableVault bool) {
 		case s := <-sigs:
 			switch s {
 			case syscall.SIGTERM, syscall.SIGINT:
-				for _, h := range handles {
-					h.Terminate()
-				}
-
-				cancel()
-				wg.Wait()
-
-				ReapChildren()
+				p.Terminate(true)
 				return
 			}
 
-			for _, h := range handles {
+			for _, h := range p.handles {
 				h.Signal(s)
 			}
 		case <-ctx.Done():
-			break
+			p.Terminate(true)
+			return
 		case <-time.After(time.Second):
 		}
+	}
+}
+
+func (p *SupervisorParent) fatal(msg string, args ...any) {
+	p.log.Logf(msg, args...)
+	p.Terminate(false)
+}
+
+func (p *SupervisorParent) Terminate(success bool) {
+	for _, h := range p.handles {
+		h.Terminate()
+	}
+
+	p.cancel()
+	p.wg.Wait()
+
+	ReapChildren()
+
+	if success {
+		os.Exit(0)
+	} else {
+		os.Exit(1)
 	}
 }
