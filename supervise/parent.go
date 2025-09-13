@@ -20,7 +20,7 @@ type SupervisorParent struct {
 	log     *logging.InternalLogger
 }
 
-func (p *SupervisorParent) Main(cfgLoc string, disableVault bool) {
+func (p *SupervisorParent) Main(cfgLoc string, disableVault bool, discoverVault bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -47,7 +47,11 @@ func (p *SupervisorParent) Main(cfgLoc string, disableVault bool) {
 
 	var vc secrets.ClientManager
 	if !disableVault {
-		vc, err = secrets.NewVaultClient(&secrets.VaultClientConfig{})
+		if discoverVault {
+			vc, err = secrets.NewAutodiscoverVaultClient(ctx)
+		} else {
+			vc, err = secrets.NewVaultClient(&secrets.VaultClientConfig{})
+		}
 		if err != nil {
 			p.fatal("parentMain: unable to setup vault: %s", err)
 			return
