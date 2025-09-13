@@ -7,9 +7,18 @@ import (
 	"path"
 	"strings"
 	"syscall"
+	"time"
 )
 
 //go:generate go run ../generate_syscall/main.go
+
+type RestartPolicy string
+
+const (
+	Always        RestartPolicy = "always"
+	Never                       = "never"
+	UnlessSuccess               = "unless-success"
+)
 
 type AppConfig struct {
 	Environment *EnvConfig  `json:"env"`
@@ -94,10 +103,73 @@ type EnvConfig struct {
 }
 
 type Command struct {
-	Name       string   `json:"name"`
-	Command    []string `json:"cmd"`
+	// Name is the name of the command. This is used for logging purposes.
+	Name string `json:"name"`
+
+	// Command is an array containing the command name and arguments.
+	// If the command name is not prefixed with a path then it will be
+	// searched in the PATH set in the environment.
+	Command []string `json:"cmd"`
+
+	// PassVariables indicates the variables from the supervisor
+	// environment that should be passed through to the subprocess
+	// environment. Only these and the vault variables below will be passed
+	// through. The default behavior, if this is not specified, is to pass
+	// all variables from the supervisor pass configuration through to the
+	// process.
+	PassVariables []string `json:"pass"`
+
+	// LogsJson indicates to the process supervisor that the log lines
+	// emitted by this process are already in JSON format. This currently
+	// does nothing.
+	LogsJson bool `json:"logs-json"`
+
+	// SuccessLifetime is the amount of time that the job must run to be
+	// considered successfully started. Anything less than this amount
+	// of time will be considered a failure to start and counted against
+	// RestartMaxRetries if restarting is enabled. If the job runs for at
+	// least this amount of time it will reset the restart counter. Default
+	// is 1 minute.
+	SuccessLifetime time.Duration
+
+	// RestartPolicy is the policy the supervisor will apply to job
+	// termination. The default for main jobs is "always", meaning the
+	// job will always be restarted if it stops running. Setting this
+	// to anything other than "never" for an init job is an error.
+	//
+	// Available policies are:
+	// - always: always restart the job if it stops running
+	// - never: never restart the job if it stops running
+	// - unless-success: restart the job only if the exit code is non-zero
+	RestartPolicy RestartPolicy `json:"restart-policy"`
+
+	// RestartMaxRetries is the number of failed attempts to restart a job
+	// before the supervisor considers it to be failed. This counter is
+	// reset to zero upon each successful job start. The default is -1,
+	// meaning no limit to retries.
+	RestartMaxRetries int
+
+	// RestartMaxTime the total amount of time allowed to attempt to
+	// restart the job before the job is considered failed by the
+	// supervisor. The supervisor will use an expoentially increasing
+	// back-off strategy for restarting the job. The default is 1 hour.
+	RestartMaxTime time.Duration
+
+	// Critical indicates that the job is considered to be critical and
+	// the failure to start or restart the job will result in the process
+	// supervisor terminating with an error. The default is true for init
+	// jobs and false otherwise.
+	Critical *bool `json:"critical"`
+
+	// RunAsUser and RunAsGroup are the user and group as which to start
+	// the job. These are specified in the `run-as` configuration stanza
+	// which takes the form user or user:group. If not specified the
+	// default is root:root.
 	RunAsUser  string
 	RunAsGroup string
+
+	// KillSignal is the name of a Unix singnal (without the SIG prefix) to
+	// send to the process upon clean termination. The default is KILL.
 	KillSignal syscall.Signal
 }
 
@@ -105,8 +177,11 @@ func (c *Command) UnmarshalJSON(d []byte) error {
 	type Alias Command
 
 	cfg := struct {
-		KillSig string `json:"kill-signal"`
-		RunAs   string `json:"run-as"`
+		KillSig           string         `json:"kill-signal"`
+		RunAs             string         `json:"run-as"`
+		RestartMaxRetries *int           `json:"restart-max-retries"`
+		RestartMaxTime    *time.Duration `json:"restart-max-time"`
+		SuccessLifetime   *time.Duration `json:"success-lifetime"`
 		*Alias
 	}{Alias: (*Alias)(c)}
 
@@ -141,6 +216,24 @@ func (c *Command) UnmarshalJSON(d []byte) error {
 
 	if c.Name == "" && len(c.Command) > 0 {
 		c.Name = path.Base(c.Command[0])
+	}
+
+	if cfg.RestartMaxRetries != nil {
+		c.RestartMaxRetries = *cfg.RestartMaxRetries
+	} else {
+		c.RestartMaxRetries = -1
+	}
+
+	if cfg.RestartMaxTime != nil {
+		c.RestartMaxTime = *cfg.RestartMaxTime
+	} else {
+		c.RestartMaxTime = time.Hour
+	}
+
+	if cfg.SuccessLifetime != nil {
+		c.SuccessLifetime = *cfg.SuccessLifetime
+	} else {
+		c.SuccessLifetime = time.Minute
 	}
 
 	return nil
