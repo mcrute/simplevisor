@@ -11,7 +11,7 @@ import (
 func main() {
 	mode := flag.String("mode", "parent", "mode in which to run simplevisor, internal use only")
 	config := flag.String("config", "simplevisor.json", "config file location")
-	noVault := flag.Bool("no-vault", false, "disable Vault integrate entirely")
+	noVault := flag.Bool("no-vault", false, "disable Vault integration entirely")
 	flag.Parse()
 
 	switch *mode {
